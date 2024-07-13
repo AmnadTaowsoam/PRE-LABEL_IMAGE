@@ -1,0 +1,119 @@
+version: '3.8'
+
+services:
+  label-studio:
+    image: heartexlabs/label-studio:latest
+    ports:
+      - "8080:8080"
+    networks:
+      - label-image-net
+    env_file:
+      - .env
+    volumes:
+      - label-studio-data:/label-studio/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: on-failure
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  image-storage:
+    image: postgres:latest
+    env_file:
+      - .env
+    ports:
+      - "5432:5432"
+    volumes:
+      - image-storage-data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d
+    networks:
+      - label-image-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB} -h ${POSTGRES_HOST} || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+
+  pgadmin:
+    image: dpage/pgadmin4
+    env_file:
+      - .env
+    ports:
+      - "${PGADMIN_PORT}:80"
+    networks:
+      - label-image-net
+    restart: on-failure
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  pre-label-model:
+    build: ./PRE-LABEL-SERVICE
+    depends_on:
+      - image-storage
+    env_file:
+      - .env
+    ports:
+      - "7000:7000"
+    networks:
+      - label-image-net
+    deploy:
+      resources:
+        limits:
+          cpus: '1.2'
+          memory: 2G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "200k"
+        max-file: "10"
+    restart: on-failure
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:7000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # webhook-service:
+  #   build:
+  #     context: ./WEBHOOK-SERVICE
+  #     dockerfile: Dockerfile
+  #   ports:
+  #     - "7001:7001"
+  #   networks:
+  #     - label-image-net
+  #   environment:
+  #     - LABEL_STUDIO_API_KEY=${LABEL_STUDIO_API_KEY}
+  #     - LABEL_STUDIO_URL=${LABEL_STUDIO_URL}
+  #     - PROJECT_ID=${PROJECT_ID}
+  #     - ML_BACKEND_URL=${ML_BACKEND_URL}
+  #   restart: on-failure
+
+  # update-task-service:
+  #   build:
+  #     context: ./UPDATE-TASK-SERVICE
+  #     dockerfile: Dockerfile
+  #   networks:
+  #     - label-image-net
+  #   environment:
+  #     - LABEL_STUDIO_API_KEY=${LABEL_STUDIO_API_KEY}
+  #     - LABEL_STUDIO_URL=${LABEL_STUDIO_URL}
+  #     - PROJECT_ID=${PROJECT_ID}
+  #     - ML_BACKEND_URL=${ML_BACKEND_URL}
+  #   restart: on-failure
+
+volumes:
+  image-storage-data:
+  label-studio-data:
+
+networks:
+  label-image-net:
